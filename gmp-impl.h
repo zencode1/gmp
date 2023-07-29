@@ -3,7 +3,7 @@
    THE CONTENTS OF THIS FILE ARE FOR INTERNAL USE AND ARE ALMOST CERTAIN TO
    BE SUBJECT TO INCOMPATIBLE CHANGES IN FUTURE GNU MP RELEASES.
 
-Copyright 1991-2018 Free Software Foundation, Inc.
+Copyright 1991-2018, 2021, 2022 Free Software Foundation, Inc.
 
 This file is part of the GNU MP Library.
 
@@ -146,6 +146,7 @@ see https://www.gnu.org/licenses/.  */
 #include "gmp-mparam.h"
 #include "fib_table.h"
 #include "fac_table.h"
+#include "sieve_table.h"
 #include "mp_bases.h"
 #if WANT_FAT_BINARY
 #include "fat.h"
@@ -1275,6 +1276,68 @@ mpn_mulmod_bnm1_itch (mp_size_t rn, mp_size_t an, mp_size_t bn) {
   return itch;
 }
 
+#ifndef MOD_BKNP1_USE11
+#define MOD_BKNP1_USE11 ((GMP_NUMB_BITS % 8 != 0) && (GMP_NUMB_BITS % 2 == 0))
+#endif
+#ifndef MOD_BKNP1_ONLY3
+#define MOD_BKNP1_ONLY3 0
+#endif
+#define mpn_mulmod_bknp1 __MPN(mulmod_bknp1)
+__GMP_DECLSPEC void mpn_mulmod_bknp1 (mp_ptr, mp_srcptr, mp_srcptr, mp_size_t, unsigned, mp_ptr);
+static inline mp_size_t
+mpn_mulmod_bknp1_itch (mp_size_t rn) {
+  return rn << 2;
+}
+#if MOD_BKNP1_ONLY3
+#define MPN_MULMOD_BKNP1_USABLE(rn, k, mn)				\
+  ((GMP_NUMB_BITS % 8 == 0) && ((mn) >= 18) && ((rn) > 16) &&		\
+   (((rn) % ((k) = 3) == 0)))
+#else
+#define MPN_MULMOD_BKNP1_USABLE(rn, k, mn)				\
+  (((GMP_NUMB_BITS % 8 == 0) && ((mn) >= 18) && ((rn) > 16) &&		\
+    (((rn) % ((k) = 3) == 0) ||						\
+     (((GMP_NUMB_BITS % 16 != 0) || (((mn) >= 35) && ((rn) >= 32))) &&	\
+      (((GMP_NUMB_BITS % 16 == 0) && ((rn) % ((k) = 5) == 0)) ||	\
+       (((mn) >= 49) &&							\
+	(((rn) % ((k) = 7) == 0) ||					\
+	 ((GMP_NUMB_BITS % 16 == 0) && ((mn) >= 104) && ((rn) >= 64) &&	\
+	  ((MOD_BKNP1_USE11 && ((rn) % ((k) = 11) == 0)) ||		\
+	   ((rn) % ((k) = 13) == 0) ||					\
+	   ((GMP_NUMB_BITS % 32 == 0) && ((mn) >= 136) && ((rn) >= 128) && \
+	    ((rn) % ((k) = 17) == 0)					\
+	    ))))))))) ||						\
+  ((GMP_NUMB_BITS % 16 != 0) && MOD_BKNP1_USE11 &&			\
+   ((mn) >= 104) && ((rn) >= 64) && ((rn) % ((k) = 11) == 0)) )
+#endif
+
+#define mpn_sqrmod_bknp1 __MPN(sqrmod_bknp1)
+__GMP_DECLSPEC void mpn_sqrmod_bknp1 (mp_ptr, mp_srcptr, mp_size_t, unsigned, mp_ptr);
+static inline mp_size_t
+mpn_sqrmod_bknp1_itch (mp_size_t rn) {
+  return rn * 3;
+}
+#if MOD_BKNP1_ONLY3
+#define MPN_SQRMOD_BKNP1_USABLE(rn, k, mn)				\
+  MPN_MULMOD_BKNP1_USABLE(rn, k, mn)
+#else
+#define MPN_SQRMOD_BKNP1_USABLE(rn, k, mn)				\
+  (((GMP_NUMB_BITS % 8 == 0) && ((mn) >= 27) && ((rn) > 24) &&		\
+    (((rn) % ((k) = 3) == 0) ||						\
+     (((GMP_NUMB_BITS % 16 != 0) || (((mn) >= 55) && ((rn) > 50))) &&	\
+      (((GMP_NUMB_BITS % 16 == 0) && ((rn) % ((k) = 5) == 0)) ||	\
+       (((mn) >= 56) &&							\
+	(((rn) % ((k) = 7) == 0) ||					\
+	 ((GMP_NUMB_BITS % 16 == 0) && ((mn) >= 143) && ((rn) >= 128) && \
+	  ((MOD_BKNP1_USE11 && ((rn) % ((k) = 11) == 0)) ||		\
+	   ((rn) % ((k) = 13) == 0) ||					\
+	   ((GMP_NUMB_BITS % 32 == 0) && ((mn) >= 272) && ((rn) >= 256) && \
+	    ((rn) % ((k) = 17) == 0)					\
+	    ))))))))) ||						\
+   ((GMP_NUMB_BITS % 16 != 0) && MOD_BKNP1_USE11 &&			\
+    ((mn) >= 143) && ((rn) >= 128) && ((rn) % ((k) = 11) == 0)) )
+#endif
+
+
 #define mpn_sqrmod_bnm1 __MPN(sqrmod_bnm1)
 __GMP_DECLSPEC void mpn_sqrmod_bnm1 (mp_ptr, mp_size_t, mp_srcptr, mp_size_t, mp_ptr);
 #define mpn_sqrmod_bnm1_next_size __MPN(sqrmod_bnm1_next_size)
@@ -1694,6 +1757,11 @@ __GMP_DECLSPEC void mpn_sec_pi1_div_r (mp_ptr, mp_size_t, mp_srcptr, mp_size_t, 
 #if GMP_NUMB_BITS % 4 == 0
 #define mpn_divexact_by15(dst,src,size) \
   (15 & 1 * mpn_bdiv_dbm1 (dst, src, size, __GMP_CAST (mp_limb_t, GMP_NUMB_MASK / 15)))
+#endif
+
+#if GMP_NUMB_BITS % 8 == 0
+#define mpn_divexact_by17(dst,src,size) \
+  (31 & 15 * mpn_bdiv_dbm1 (dst, src, size, __GMP_CAST (mp_limb_t, GMP_NUMB_MASK / 17)))
 #endif
 
 #define mpz_divexact_gcd  __gmpz_divexact_gcd
@@ -3924,10 +3992,12 @@ __GMP_DECLSPEC extern const int __gmp_0;
 __GMP_DECLSPEC void __gmp_exception (int) ATTRIBUTE_NORETURN;
 __GMP_DECLSPEC void __gmp_divide_by_zero (void) ATTRIBUTE_NORETURN;
 __GMP_DECLSPEC void __gmp_sqrt_of_negative (void) ATTRIBUTE_NORETURN;
+__GMP_DECLSPEC void __gmp_overflow_in_mpz (void) ATTRIBUTE_NORETURN;
 __GMP_DECLSPEC void __gmp_invalid_operation (void) ATTRIBUTE_NORETURN;
 #define GMP_ERROR(code)   __gmp_exception (code)
 #define DIVIDE_BY_ZERO    __gmp_divide_by_zero ()
 #define SQRT_OF_NEGATIVE  __gmp_sqrt_of_negative ()
+#define MPZ_OVERFLOW      __gmp_overflow_in_mpz ()
 
 #if defined _LONG_LONG_LIMB
 #define CNST_LIMB(C) ((mp_limb_t) C##LL)
@@ -4182,7 +4252,7 @@ mpn_jacobi_update (unsigned bits, unsigned denominator, unsigned q)
      One could maintain the state preshifted 3 bits, to save a shift
      here, but at least on x86, that's no real saving.
   */
-  return bits = jacobi_table[(bits << 3) + (denominator << 2) + q];
+  return jacobi_table[(bits << 3) + (denominator << 2) + q];
 }
 
 /* Matrix multiplication */

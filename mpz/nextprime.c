@@ -1,6 +1,7 @@
 /* mpz_nextprime(p,t) - compute the next prime > t and store that in p.
 
-Copyright 1999-2001, 2008, 2009, 2012, 2020 Free Software Foundation, Inc.
+Copyright 1999-2001, 2008, 2009, 2012, 2020-2022 Free Software
+Foundation, Inc.
 
 Contributed to the GNU project by Niels Möller and Torbjorn Granlund.
 Improved by Seth Troisi.
@@ -41,39 +42,10 @@ see https://www.gnu.org/licenses/.  */
 /*********************************************************/
 
 static mp_limb_t
-id_to_n  (mp_limb_t id)  { return id*3+1+(id&1); }
-
-static mp_limb_t
 n_to_bit (mp_limb_t n) { return ((n-5)|1)/3U; }
 
 static mp_size_t
 primesieve_size (mp_limb_t n) { return n_to_bit(n) / GMP_LIMB_BITS + 1; }
-
-
-/************************************/
-/* Section macros: macros for sieve */
-/************************************/
-
-#define LOOP_ON_SIEVE_BEGIN(prime,start,end,sieve)     \
-  do {                                                 \
-    mp_limb_t __mask, __index, __max_i, __i;           \
-    __i = (start);                                     \
-    __index = __i / GMP_LIMB_BITS;                     \
-    __mask = CNST_LIMB(1) << (__i % GMP_LIMB_BITS);    \
-    __max_i = (end);                                   \
-    do {                                               \
-      ++__i;                                           \
-      if (((sieve)[__index] & __mask) == 0)            \
-        {                                              \
-          mp_limb_t prime = id_to_n(__i)               \
-
-#define LOOP_ON_SIEVE_END                                 \
-        }                                                 \
-      __mask = __mask << 1 | __mask >> (GMP_LIMB_BITS-1); \
-      __index += __mask & 1;                              \
-    }  while (__i <= __max_i);                            \
-  } while (0)
-
 
 
 static const unsigned char primegap_small[] =
@@ -98,14 +70,15 @@ calculate_sievelimit(mp_bitcnt_t nbits) {
    *      vs
    *   Cost of PRP test O(N^2.55)
    */
-  if (nbits < 12800)
+  if (nbits < 12818)
     {
       mpz_t tmp;
       /* sieve_limit ~= nbits ^ (5/2) / 124 */
       mpz_init (tmp);
       mpz_ui_pow_ui (tmp, nbits, 5);
+      mpz_tdiv_q_ui(tmp, tmp, 124*124);
+      /* tmp < 12818^5/(124*124) < 2^55 < 2^64 */
       mpz_sqrt (tmp, tmp);
-      mpz_tdiv_q_ui(tmp, tmp, 124);
 
       sieve_limit = mpz_get_ui(tmp);
       mpz_clear (tmp);
@@ -119,7 +92,7 @@ calculate_sievelimit(mp_bitcnt_t nbits) {
       sieve_limit = 150000001;
     }
 
-  ASSERT( 1000 < sieve_limit && sieve_limit <= 150000001 );
+  ASSERT (1000 < sieve_limit && sieve_limit <= 150000001);
   return sieve_limit;
 }
 
@@ -173,8 +146,8 @@ findnext (mpz_ptr p,
   MPN_SIZEINBASE_2EXP(nbits, PTR(p), pn, 1);
   /* Smaller numbers handled earlier */
   ASSERT (nbits >= 3);
-  /* p odd */
-  ASSERT ((PTR(p)[0] & 1) == 1);
+  /* Make p odd */
+  PTR(p)[0] |= 1;
 
   if (nbits / 2 <= NUMBER_OF_PRIMES)
     {
@@ -208,10 +181,15 @@ findnext (mpz_ptr p,
 
       i = 0;
       last_prime = 3;
-      LOOP_ON_SIEVE_BEGIN (prime, n_to_bit (5), n_to_bit (sieve_limit), sieve);
-        primegap_tmp[i++] = prime - last_prime;
-        last_prime = prime;
-      LOOP_ON_SIEVE_END;
+      /* THINK: should we get rid of sieve_limit and use (i < prime_limit)? */
+      for (mp_limb_t j = 4, *sp = sieve; j < sieve_limit; j += GMP_LIMB_BITS * 3)
+	for (mp_limb_t b = j, x = ~ *(sp++); x != 0; b += 3, x >>= 1)
+	  if (x & 1)
+	    {
+	      mp_limb_t prime = b | 1;
+	      primegap_tmp[i++] = prime - last_prime;
+	      last_prime = prime;
+	    }
 
       /* Both primesieve and prime_limit ignore the first two primes. */
       ASSERT(i == prime_limit);
@@ -226,7 +204,7 @@ findnext (mpz_ptr p,
     odds_in_composite_sieve = 5 * nbits;
 
   /* composite[2*i] stores if p+2*i is a known composite */
-  composite = TMP_SALLOC_TYPE (odds_in_composite_sieve, char);
+  composite = TMP_ALLOC_TYPE (odds_in_composite_sieve, char);
 
   for (;;)
     {
@@ -287,7 +265,6 @@ mpz_nextprime (mpz_ptr p, mpz_srcptr n)
 
   /* First odd greater than n */
   mpz_add_ui (p, n, 1);
-  mpz_setbit (p, 0);
 
   findnext(p, mpz_cdiv_ui, mpz_add_ui);
 }
@@ -308,10 +285,7 @@ mpz_prevprime (mpz_ptr p, mpz_srcptr n)
 
   /* First odd less than n */
   mpz_sub_ui (p, n, 2);
-  mpz_setbit (p, 0);
 
-  return findnext(p, mpz_fdiv_ui, mpz_sub_ui);
+  return findnext(p, mpz_tdiv_ui, mpz_sub_ui);
 }
 
-#undef LOOP_ON_SIEVE_END
-#undef LOOP_ON_SIEVE_BEGIN

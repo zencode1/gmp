@@ -1,8 +1,9 @@
 /* mini-gmp, a minimalistic implementation of a GNU GMP subset.
 
    Contributed to the GNU project by Niels Möller
+   Additional functionalities and improvements by Marco Bodrato.
 
-Copyright 1991-1997, 1999-2021 Free Software Foundation, Inc.
+Copyright 1991-1997, 1999-2022 Free Software Foundation, Inc.
 
 This file is part of the GNU MP Library.
 
@@ -90,6 +91,7 @@ see https://www.gnu.org/licenses/.  */
 #define gmp_assert_nocarry(x) do { \
     mp_limb_t __cy = (x);	   \
     assert (__cy == 0);		   \
+    (void) (__cy);		   \
   } while (0)
 
 #define gmp_clz(count, x) do {						\
@@ -148,6 +150,7 @@ see https://www.gnu.org/licenses/.  */
       mp_limb_t __x0, __x1, __x2, __x3;					\
       unsigned __ul, __vl, __uh, __vh;					\
       mp_limb_t __u = (u), __v = (v);					\
+      assert (sizeof (unsigned) * 2 >= sizeof (mp_limb_t));		\
 									\
       __ul = __u & GMP_LLIMB_MASK;					\
       __uh = __u >> (GMP_LIMB_BITS / 2);				\
@@ -169,12 +172,19 @@ see https://www.gnu.org/licenses/.  */
     }									\
   } while (0)
 
+/* If mp_limb_t is of size smaller than int, plain u*v implies
+   automatic promotion to *signed* int, and then multiply may overflow
+   and cause undefined behavior. Explicitly cast to unsigned int for
+   that case. */
+#define gmp_umullo_limb(u, v) \
+  ((sizeof(mp_limb_t) >= sizeof(int)) ? (u)*(v) : (unsigned int)(u) * (v))
+
 #define gmp_udiv_qrnnd_preinv(q, r, nh, nl, d, di)			\
   do {									\
     mp_limb_t _qh, _ql, _r, _mask;					\
     gmp_umul_ppmm (_qh, _ql, (nh), (di));				\
     gmp_add_ssaaaa (_qh, _ql, _qh, _ql, (nh) + 1, (nl));		\
-    _r = (nl) - _qh * (d);						\
+    _r = (nl) - gmp_umullo_limb (_qh, (d));				\
     _mask = -(mp_limb_t) (_r > _ql); /* both > and >= are OK */		\
     _qh += _mask;							\
     _r += _mask & (d);							\
@@ -195,7 +205,7 @@ see https://www.gnu.org/licenses/.  */
     gmp_add_ssaaaa ((q), _q0, (q), _q0, (n2), (n1));			\
 									\
     /* Compute the two most significant limbs of n - q'd */		\
-    (r1) = (n1) - (d1) * (q);						\
+    (r1) = (n1) - gmp_umullo_limb ((d1), (q));				\
     gmp_sub_ddmmss ((r1), (r0), (r1), (n0), (d1), (d0));		\
     gmp_umul_ppmm (_t1, _t0, (d0), (q));				\
     gmp_sub_ddmmss ((r1), (r0), (r1), (r0), _t1, _t0);			\
@@ -783,6 +793,7 @@ mpn_invert_3by2 (mp_limb_t u1, mp_limb_t u0)
     mp_limb_t p, ql;
     unsigned ul, uh, qh;
 
+    assert (sizeof (unsigned) * 2 >= sizeof (mp_limb_t));
     /* For notation, let b denote the half-limb base, so that B = b^2.
        Split u1 = b uh + ul. */
     ul = u1 & GMP_LLIMB_MASK;
@@ -1935,9 +1946,8 @@ mpz_neg (mpz_t r, const mpz_t u)
 void
 mpz_swap (mpz_t u, mpz_t v)
 {
-  MP_SIZE_T_SWAP (u->_mp_size, v->_mp_size);
   MP_SIZE_T_SWAP (u->_mp_alloc, v->_mp_alloc);
-  MP_PTR_SWAP (u->_mp_d, v->_mp_d);
+  MPN_PTR_SWAP (u->_mp_d, u->_mp_size, v->_mp_d, v->_mp_size);
 }
 
 
@@ -3096,7 +3106,7 @@ mpz_powm (mpz_t r, const mpz_t b, const mpz_t e, const mpz_t m)
 
   if (en == 0)
     {
-      mpz_set_ui (r, 1);
+      mpz_set_ui (r, mpz_cmpabs_ui (m, 1));
       return;
     }
 
@@ -3198,6 +3208,7 @@ void
 mpz_rootrem (mpz_t x, mpz_t r, const mpz_t y, unsigned long z)
 {
   int sgn;
+  mp_bitcnt_t bc;
   mpz_t t, u;
 
   sgn = y->_mp_size < 0;
@@ -3216,7 +3227,8 @@ mpz_rootrem (mpz_t x, mpz_t r, const mpz_t y, unsigned long z)
 
   mpz_init (u);
   mpz_init (t);
-  mpz_setbit (t, mpz_sizeinbase (y, 2) / z + 1);
+  bc = (mpz_sizeinbase (y, 2) - 1) / z + 1;
+  mpz_setbit (t, bc);
 
   if (z == 2) /* simplify sqrt loop: z-1 == 1 */
     do {
@@ -3523,7 +3535,8 @@ gmp_stronglucas (const mpz_t x, mpz_t Qk)
   mpz_init (V);
 
   /* n-(D/n) = n+1 = d*2^{b0}, with d = (n>>b0) | 1 */
-  b0 = mpz_scan0 (n, 0);
+  b0 = mpn_common_scan (~ n->_mp_d[0], 0, n->_mp_d, n->_mp_size, GMP_LIMB_MAX);
+  /* b0 = mpz_scan0 (n, 0); */
 
   /* D= P^2 - 4Q; P = 1; Q = (1-D)/4 */
   Q = (D & 2) ? (long) (D >> 2) + 1 : -(long) (D >> 2);
